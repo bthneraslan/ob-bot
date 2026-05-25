@@ -1,0 +1,45 @@
+name: ob-bot
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '2 */6 * * *'   # her 6 saatte bir
+permissions:
+  contents: write
+concurrency:
+  group: ob-bot
+  cancel-in-progress: false
+jobs:
+  trade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350     # ~5s 50dk calis, sonra state kaydet
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Config hazirla (telegram secret enjekte)
+        run: |
+          mkdir -p user_data/strategies
+          cp OBlock_1h.py user_data/strategies/
+          sed -e "s#__TG_TOKEN__#${{ secrets.TG_TOKEN }}#" \
+              -e "s#__TG_CHAT__#${{ secrets.TG_CHAT }}#" \
+              config_okx.json > user_data/config_live.json
+          chmod -R 777 user_data
+
+      - name: Bot calis (freqtrade docker + smc)
+        run: |
+          timeout 19800 docker run --rm \
+            -v "$PWD/user_data":/freqtrade/user_data \
+            --entrypoint bash \
+            freqtradeorg/freqtrade:stable \
+            -c "pip install --no-cache-dir smartmoneyconcepts 2>/dev/null; freqtrade trade --userdir /freqtrade/user_data --config /freqtrade/user_data/config_live.json --strategy OBlock_1h" || true
+
+      - name: State'i repo'ya kaydet
+        if: always()
+        run: |
+          sudo chmod -R a+rw user_data || true
+          rm -f user_data/config_live.json
+          git config user.name "ob-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add user_data/tradesv3.dryrun.sqlite* 2>/dev/null || true
+          git commit -m "state $(date -u +%FT%TZ)" || echo "degisiklik yok"
+          git pull --rebase --autostash || true
+          git push || true

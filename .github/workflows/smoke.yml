@@ -1,0 +1,24 @@
+name: smoke-test
+on:
+  workflow_dispatch:
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Config hazirla
+        run: |
+          mkdir -p user_data/strategies
+          cp OBlock_1h.py user_data/strategies/
+          sed -e "s#__TG_TOKEN__#${{ secrets.TG_TOKEN }}#" \
+              -e "s#__TG_CHAT__#${{ secrets.TG_CHAT }}#" \
+              config_okx.json > user_data/config_live.json
+          chmod -R 777 user_data
+      - name: 3 dk calis ve durumu gor
+        run: |
+          timeout 200 docker run --rm \
+            -v "$PWD/user_data":/freqtrade/user_data \
+            --entrypoint bash \
+            freqtradeorg/freqtrade:stable \
+            -c "pip install --no-cache-dir smartmoneyconcepts 2>&1 | tail -1; freqtrade trade --userdir /freqtrade/user_data --config /freqtrade/user_data/config_live.json --strategy OBlock_1h" 2>&1 | grep -iE "heartbeat|Bot started|ERROR|Exchange|pairs|Searching|RUNNING|Traceback|okx|smartmoney|No module|invalid" | head -40 || true
+          echo "=== SMOKE BITTI ==="
